@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>KDF Brutalist Playground</title>
+  <style>
+    html, body { height: 100%; margin: 0; background:#0b0c0d; color:#e8e8e8; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    #wrap { position: fixed; inset: 0; display: grid; grid-template-rows: auto 1fr auto; }
+    header, footer { padding: 10px 12px; backdrop-filter: saturate(120%) blur(6px); background: rgba(16,16,18,0.55); }
+    header { font-weight: 600; letter-spacing: .2px; }
+    #ui { display: grid; grid-auto-flow: column; gap: 8px; overflow-x: auto; }
+    button { font-size: 16px; padding: 12px 14px; border-radius: 12px; border: 0; background:#1c1f23; color:#fff; }
+    button:active { transform: translateY(1px); }
+    #canvas { width: 100%; height: 100%; touch-action: none; outline: none; display: block; }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <header>Brutalist Builder — touch to orbit, pinch to zoom</header>
+    <canvas id="canvas"></canvas>
+    <footer>
+      <div id="ui">
+        <button id="add">New Block</button>
+        <button id="rand">Randomize</button>
+        <button id="save">Save Layout</button>
+        <button id="load">Load Layout</button>
+        <button id="export">Export GLB</button>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Babylon UMD + serializers from CDN (global BABYLON namespace) -->
+  <script src="https://cdn.jsdelivr.net/npm/babylonjs@8/babylon.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/babylonjs-serializers@8/babylonjs.serializers.min.js"></script>
+
+  <script>
+  (function () {
+    const canvas = document.getElementById("canvas");
+    const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
+    const scene  = new BABYLON.Scene(engine);
+
+    // Camera (touch-friendly orbit)
+    const camera = new BABYLON.ArcRotateCamera("cam",
+      Math.PI * 0.25, Math.PI * 0.33, 22,
+      new BABYLON.Vector3(0, 3, 0), scene);
+    camera.lowerRadiusLimit = 6;
+    camera.upperRadiusLimit = 80;
+    camera.panningSensibility = 1200;
+    camera.wheelPrecision = 40; // gentler pinch
+    camera.attachControl(canvas, true);
+
+    // Lights
+    const hemi = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0.2, 1, 0), scene);
+    hemi.intensity = 0.7;
+    const dir = new BABYLON.DirectionalLight("d", new BABYLON.Vector3(-1, -2, -0.5), scene);
+    dir.position = new BABYLON.Vector3(10, 20, 10);
+    dir.intensity = 0.8;
+
+    // Ground plane
+    const ground = BABYLON.MeshBuilder.CreateGround("g", { width: 80, height: 80 }, scene);
+    const gmat = new BABYLON.PBRMaterial("gmat", scene);
+    gmat.roughness = 0.9; gmat.metallic = 0.0; gmat.albedoColor = new BABYLON.Color3(0.08, 0.09, 0.10);
+    ground.material = gmat;
+
+    // Block styling
+    function makeConcrete(scene) {
+      const m = new BABYLON.PBRMaterial("m" + Math.random(), scene);
+      m.metallic = 0.05;
+      m.roughness = 0.55;
+      const c = 0.58 + Math.random()*0.1;
+      m.albedoColor = new BABYLON.Color3(c, c, c);
+      return m;
+    }
+
+    const blocks = [];
+    function addBlock(opts = {}) {
+      const w = opts.w || (1 + Math.floor(Math.random()*3));
+      const h = opts.h || (1 + Math.floor(Math.random()*6));
+      const d = opts.d || (1 + Math.floor(Math.random()*3));
+      const mesh = BABYLON.MeshBuilder.CreateBox("b", { width:w, height:h, depth:d }, scene);
+      mesh.material = makeConcrete(scene);
+
+      // snap to grid + stack
+      const gx = (Math.floor((Math.random()*10 - 5)))*2;
+      const gz = (Math.floor((Math.random()*10 - 5)))*2;
+      mesh.position.x = gx;
+      mesh.position.z = gz;
+      mesh.position.y = h/2;
+
+      // tiny rotation variance
+      mesh.rotation.y = (Math.random() - 0.5) * 0.1;
+      blocks.push(mesh);
+      return mesh;
+    }
+
+    function randomize() {
+      blocks.forEach(b => b.dispose());
+      blocks.length = 0;
+      const count = 18 + Math.floor(Math.random()*16);
+      for (let i=0;i<count;i++) addBlock();
+    }
+
+    function saveLayout() {
+      const data = blocks.map(b => ({
+        p: { x:b.position.x, y:b.position.y, z:b.position.z },
+        r: { x:b.rotation.x, y:b.rotation.y, z:b.rotation.z },
+        s: { x:b.scaling.x, y:b.scaling.y, z:b.scaling.z },
+        d: { w:b.getBoundingInfo().boundingBox.extendSizeWorld.x*2,
+             h:b.getBoundingInfo().boundingBox.extendSizeWorld.y*2,
+             z:b.getBoundingInfo().boundingBox.extendSizeWorld.z*2 }
+      }));
+      localStorage.setItem("kdf_brutal_layout", JSON.stringify(data));
+      toast("Saved.");
+    }
+
+    function loadLayout() {
+      const raw = localStorage.getItem("kdf_brutal_layout");
+      if (!raw) return toast("No save found.");
+      blocks.forEach(b => b.dispose()); blocks.length = 0;
+      const data = JSON.parse(raw);
+      data.forEach(it => {
+        const mesh = BABYLON.MeshBuilder.CreateBox("b", { width: it.d.w, height: it.d.h, depth: it.d.z }, scene);
+        mesh.material = makeConcrete(scene);
+        mesh.position.set(it.p.x, it.p.y, it.p.z);
+        mesh.rotation.set(it.r.x, it.r.y, it.r.z);
+        blocks.push(mesh);
+      });
+      toast("Loaded.");
+    }
+
+    async function exportGLB() {
+      if (!BABYLON.GLTF2Export) { return toast("Serializer not loaded"); }
+      try {
+        const result = await BABYLON.GLTF2Export.GLBAsync(scene, "brutalist-playground");
+        result.downloadFiles(); // triggers download on iOS/Safari too
+        toast("Exported .glb");
+      } catch (e) {
+        console.error(e);
+        toast("Export failed (see console).");
+      }
+    }
+
+    // Tiny toasts
+    let t; function toast(msg){ clearTimeout(t); const el = document.createElement("div");
+      el.textContent = msg; Object.assign(el.style,{
+        position:"fixed", bottom:"88px", left:"50%", transform:"translateX(-50%)",
+        background:"rgba(30,30,34,.9)", color:"#fff", padding:"10px 14px", borderRadius:"10px",
+        fontSize:"14px", zIndex:9
+      }); document.body.appendChild(el); t=setTimeout(()=>el.remove(),1400);
+    }
+
+    // UI hooks
+    document.getElementById("add").onclick = () => { addBlock(); };
+    document.getElementById("rand").onclick = () => randomize();
+    document.getElementById("save").onclick = () => saveLayout();
+    document.getElementById("load").onclick = () => loadLayout();
+    document.getElementById("export").onclick = () => exportGLB();
+
+    // initial scene
+    randomize();
+
+    // Resize & render
+    window.addEventListener("resize", () => engine.resize());
+    engine.runRenderLoop(() => scene.render());
+  })();
+  </script>
+</body>
+</html>
