@@ -5,35 +5,75 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>KDF Brutalist Playground</title>
   <style>
+    :root{
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --bar-bg: rgba(16,16,18,.65);
+    }
     html, body { height: 100%; margin: 0; background:#0b0c0d; color:#e8e8e8; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-    #wrap { position: fixed; inset: 0; display: grid; grid-template-rows: auto 1fr auto; }
-    header, footer { padding: 10px 12px; backdrop-filter: saturate(120%) blur(6px); background: rgba(16,16,18,0.55); }
-    header { font-weight: 600; letter-spacing: .2px; }
-    #ui { display: grid; grid-auto-flow: column; gap: 8px; overflow-x: auto; }
-    button { font-size: 16px; padding: 12px 14px; border-radius: 12px; border: 0; background:#1c1f23; color:#fff; }
+    /* Full-viewport app area that accounts for iOS dynamic bars */
+    #app { min-height: 100dvh; min-height: 100vh; position: relative; overflow: hidden; }
+
+    /* Fixed header & footer sit ABOVE the canvas */
+    header, footer {
+      position: fixed; left: 0; right: 0;
+      z-index: 9999;
+      padding: 10px 12px;
+      background: var(--bar-bg);
+      -webkit-backdrop-filter: saturate(120%) blur(6px);
+      backdrop-filter: saturate(120%) blur(6px);
+    }
+    header { top: 0; padding-top: calc(10px + var(--safe-top)); font-weight: 600; letter-spacing: .2px; }
+    footer { bottom: 0; padding-bottom: calc(12px + var(--safe-bottom)); }
+
+    /* Canvas fills the space between header and footer */
+    #stage {
+      position: absolute; inset: 0;
+      /* keep content clear of the bars */
+      padding-top: calc(48px + var(--safe-top));
+      padding-bottom: calc(64px + var(--safe-bottom));
+    }
+    #canvas {
+      width: 100%; height: 100%;
+      display: block; outline: none;
+      touch-action: none; /* allow Babylon to handle gestures */
+      -webkit-user-select: none; user-select: none;
+      position: relative; z-index: 1; /* sits UNDER header/footer */
+    }
+
+    /* Footer UI */
+    #ui { display: grid; grid-auto-flow: column; gap: 8px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    button {
+      font-size: 16px; padding: 12px 14px;
+      border-radius: 12px; border: 0;
+      background:#1c1f23; color:#fff; white-space: nowrap;
+    }
     button:active { transform: translateY(1px); }
-    #canvas { width: 100%; height: 100%; touch-action: none; outline: none; display: block; }
-    footer { padding-bottom: calc(12px + env(safe-area-inset-bottom)); position: relative; z-index: 5; }
-    footer { background:#111 !important; outline:2px solid magenta; }
-    #canvas { z-index: 1; }
   </style>
 </head>
 <body>
-  <div id="wrap">
+  <div id="app">
     <header>Brutalist Builder — touch to orbit, pinch to zoom</header>
-    <canvas id="canvas"></canvas>
+
+    <div id="stage">
+      <canvas id="canvas"></canvas>
+    </div>
+
     <footer>
       <div id="ui">
         <button id="add">New Block</button>
         <button id="rand">Randomize</button>
-        <button id="save">Save Layout</button>
-        <button id="load">Load Layout</button>
+        <button id="save">Save</button>
+        <button id="load">Load</button>
         <button id="export">Export GLB</button>
+        <button id="zoomIn">Zoom +</button>
+        <button id="zoomOut">Zoom −</button>
+        <button id="home">Home</button>
       </div>
     </footer>
   </div>
 
-  <!-- Babylon UMD + serializers from CDN (global BABYLON namespace) -->
+  <!-- Babylon UMD + serializers -->
   <script src="https://cdn.jsdelivr.net/npm/babylonjs@8/babylon.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/babylonjs-serializers@8/babylonjs.serializers.min.js"></script>
 
@@ -50,7 +90,9 @@
     camera.lowerRadiusLimit = 6;
     camera.upperRadiusLimit = 80;
     camera.panningSensibility = 1200;
-    camera.wheelPrecision = 40; // gentler pinch
+    camera.wheelPrecision = 40;
+    camera.pinchDeltaPercentage = 0.01;
+    camera.useNaturalPinchZoom = true;
     camera.attachControl(canvas, true);
 
     // Lights
@@ -66,11 +108,10 @@
     gmat.roughness = 0.9; gmat.metallic = 0.0; gmat.albedoColor = new BABYLON.Color3(0.08, 0.09, 0.10);
     ground.material = gmat;
 
-    // Block styling
+    // Concrete material helper
     function makeConcrete(scene) {
       const m = new BABYLON.PBRMaterial("m" + Math.random(), scene);
-      m.metallic = 0.05;
-      m.roughness = 0.55;
+      m.metallic = 0.05; m.roughness = 0.55;
       const c = 0.58 + Math.random()*0.1;
       m.albedoColor = new BABYLON.Color3(c, c, c);
       return m;
@@ -87,9 +128,7 @@
       // snap to grid + stack
       const gx = (Math.floor((Math.random()*10 - 5)))*2;
       const gz = (Math.floor((Math.random()*10 - 5)))*2;
-      mesh.position.x = gx;
-      mesh.position.z = gz;
-      mesh.position.y = h/2;
+      mesh.position.x = gx; mesh.position.z = gz; mesh.position.y = h/2;
 
       // tiny rotation variance
       mesh.rotation.y = (Math.random() - 0.5) * 0.1;
@@ -98,8 +137,7 @@
     }
 
     function randomize() {
-      blocks.forEach(b => b.dispose());
-      blocks.length = 0;
+      blocks.forEach(b => b.dispose()); blocks.length = 0;
       const count = 18 + Math.floor(Math.random()*16);
       for (let i=0;i<count;i++) addBlock();
     }
@@ -114,56 +152,67 @@
              z:b.getBoundingInfo().boundingBox.extendSizeWorld.z*2 }
       }));
       localStorage.setItem("kdf_brutal_layout", JSON.stringify(data));
-      toast("Saved.");
+      toast("Saved");
     }
 
     function loadLayout() {
       const raw = localStorage.getItem("kdf_brutal_layout");
-      if (!raw) return toast("No save found.");
+      if (!raw) return toast("No save found");
       blocks.forEach(b => b.dispose()); blocks.length = 0;
-      const data = JSON.parse(raw);
-      data.forEach(it => {
+      JSON.parse(raw).forEach(it => {
         const mesh = BABYLON.MeshBuilder.CreateBox("b", { width: it.d.w, height: it.d.h, depth: it.d.z }, scene);
         mesh.material = makeConcrete(scene);
         mesh.position.set(it.p.x, it.p.y, it.p.z);
         mesh.rotation.set(it.r.x, it.r.y, it.r.z);
         blocks.push(mesh);
       });
-      toast("Loaded.");
+      toast("Loaded");
     }
 
     async function exportGLB() {
-      if (!BABYLON.GLTF2Export) { return toast("Serializer not loaded"); }
+      if (!BABYLON.GLTF2Export) return toast("Serializer missing");
       try {
         const result = await BABYLON.GLTF2Export.GLBAsync(scene, "brutalist-playground");
-        result.downloadFiles(); // triggers download on iOS/Safari too
+        result.downloadFiles(); // iOS: goes to Files > Downloads
         toast("Exported .glb");
-      } catch (e) {
-        console.error(e);
-        toast("Export failed (see console).");
-      }
+      } catch (e) { console.error(e); toast("Export failed"); }
     }
 
-    // Tiny toasts
-    let t; function toast(msg){ clearTimeout(t); const el = document.createElement("div");
-      el.textContent = msg; Object.assign(el.style,{
-        position:"fixed", bottom:"88px", left:"50%", transform:"translateX(-50%)",
-        background:"rgba(30,30,34,.9)", color:"#fff", padding:"10px 14px", borderRadius:"10px",
-        fontSize:"14px", zIndex:9
-      }); document.body.appendChild(el); t=setTimeout(()=>el.remove(),1400);
+    // Tiny toast helper (no dependencies)
+    let t;
+    function toast(msg){
+      clearTimeout(t);
+      const el = document.createElement("div");
+      el.textContent = msg;
+      Object.assign(el.style,{
+        position:"fixed", bottom: `calc(88px + ${getComputedStyle(document.documentElement).getPropertyValue('--safe-bottom')||'0px'})`,
+        left:"50%", transform:"translateX(-50%)",
+        background:"rgba(30,30,34,.9)", color:"#fff",
+        padding:"10px 14px", borderRadius:"10px",
+        fontSize:"14px", zIndex: 10000
+      });
+      document.body.appendChild(el);
+      t=setTimeout(()=>el.remove(),1400);
     }
 
     // UI hooks
-    document.getElementById("add").onclick = () => { addBlock(); };
+    const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+    document.getElementById("add").onclick = () => addBlock();
     document.getElementById("rand").onclick = () => randomize();
     document.getElementById("save").onclick = () => saveLayout();
     document.getElementById("load").onclick = () => loadLayout();
     document.getElementById("export").onclick = () => exportGLB();
+    document.getElementById("zoomIn").onclick  = () => { camera.radius = clamp(camera.radius * 0.9, camera.lowerRadiusLimit, camera.upperRadiusLimit); };
+    document.getElementById("zoomOut").onclick = () => { camera.radius = clamp(camera.radius / 0.9, camera.lowerRadiusLimit, camera.upperRadiusLimit); };
+    document.getElementById("home").onclick    = () => {
+      camera.alpha = Math.PI * 0.25;
+      camera.beta  = Math.PI * 0.33;
+      camera.radius = 22;
+      camera.setTarget(new BABYLON.Vector3(0, 3, 0));
+    };
 
-    // initial scene
+    // Initial scene + render
     randomize();
-
-    // Resize & render
     window.addEventListener("resize", () => engine.resize());
     engine.runRenderLoop(() => scene.render());
   })();
