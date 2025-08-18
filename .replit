@@ -1,2 +1,6 @@
 [objectStorage]
 defaultBucketID = "replit-objstore-c39c98e6-916e-4202-92b5-56ae5ba1c6e7"
+
+[deployment]
+deploymentTarget = "static"
+publicDir = "/"
