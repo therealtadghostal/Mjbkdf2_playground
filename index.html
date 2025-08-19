@@ -271,7 +271,7 @@
       }
       toast("Water added");
     }
-    function clearWater(){ waterMeshes.forEach(m=>m.dispose()); waterMeshes=[]; waterMaterials=[]; toast("Water cleared"); }
+    function clearWater(){ waterMeshes.forEach(m=>m.dispose()); waterMeshes=[]; waterMaterials=[]; toast("Water cleared"); } //see butthead???
     function updateAllWaterRenderLists(){
       waterMaterials.forEach(mat=>{
         mat.renderList=[ground];
