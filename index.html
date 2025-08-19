@@ -55,7 +55,7 @@
     const scene  = new BABYLON.Scene(engine);
     scene.clearColor = new BABYLON.Color4(0.07,0.08,0.09,1);
 
-    // env + tone mapping (metallic pops + helps Drama)
+    // env + tone mapping
     scene.environmentTexture = BABYLON.CubeTexture.CreateFromPrefilteredData(
       "https://assets.babylonjs.com/environments/environmentSpecular.env", scene
     );
@@ -106,7 +106,7 @@
     }
     let drama = true; setDrama(drama);
 
-    // toast (single element; cannot get stuck)
+    // toast
     let toastEl=null, toastTimer=null;
     function toast(msg){
       if(!toastEl){
@@ -132,43 +132,104 @@
       return m;
     }
 
-    // blocks
+    // ====== STACK-BIAS TOWER SYSTEM ======
+    const GRID = 2;                               // snap grid (units)
     const blocks=[];
+
+    // map of tower cell -> current top Y; cell key "x|z" where x,z are snapped world coords
+    const towerTops = new Map();
+    const cellKey = (x,z)=>`${x}|${z}`;
+    const snap = v => Math.round(v/GRID)*GRID;
+
+    function nextYForCell(cx, cz, h){
+      const k = cellKey(cx,cz);
+      const top = towerTops.get(k) || 0;
+      towerTops.set(k, top + h);
+      return top + h/2;                              // center of this block
+    }
+    function chooseExistingCell(){
+      const keys = [...towerTops.keys()];
+      if (!keys.length) return null;
+      const k = keys[(Math.random()*keys.length)|0];
+      const [x,z] = k.split("|").map(Number);
+      return {x,z};
+    }
+    function chooseNewCell(){
+      const M = GROUND_SIZE/2 - 12;
+      let cx = snap((Math.random()*2-1)*M);
+      let cz = snap((Math.random()*2-1)*M);
+      return {x:cx, z:cz};
+    }
+
     function addBlockAt(x,y,z,w,h,d){
       const mesh = BABYLON.MeshBuilder.CreateBox("b",{width:w,height:h,depth:d},scene);
       mesh.material = makeBlockMaterial();
-      mesh.position.set(x,y,z); mesh.rotation.y=(Math.random()-0.5)*0.12;
+      mesh.position.set(x + (Math.random()-0.5)*0.08, y, z + (Math.random()-0.5)*0.08); // tiny jitter so it’s not dead perfect
+      mesh.rotation.y = (Math.random()-0.5)*0.08;                                       // subtle variety
       shadow.addShadowCaster(mesh,true);
       blocks.push(mesh);
       waterMaterials.forEach(mat=>mat.addToRenderList(mesh));
       if(physicsOn){
-        mesh.physicsImpostor = new BABYLON.PhysicsImpostor(mesh,BABYLON.PhysicsImpostor.BoxImpostor,
-          {mass:2,restitution:0.1,friction:0.6},scene);
+        mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
+          mesh, BABYLON.PhysicsImpostor.BoxImpostor, {mass:2,restitution:0.05,friction:0.7}, scene
+        );
       }
       return mesh;
     }
-    function addBlock(){
-      const w=1+(Math.random()*3|0), h=1+(Math.random()*6|0), d=1+(Math.random()*3|0);
-      const M=GROUND_SIZE/2-10; const x=(Math.random()*2-1)*M, z=(Math.random()*2-1)*M;
-      return addBlockAt(x,h/2,z,w,h,d);
-    }
-    function randomize(){
-      blocks.forEach(b=>{ if(b.physicsImpostor) b.physicsImpostor.dispose(); b.dispose(); });
-      blocks.length=0;
-      const towers=8+(Math.random()*8|0);
-      for(let t=0;t<towers;t++){
-        const M=GROUND_SIZE/2-14, baseX=(Math.random()*2-1)*M, baseZ=(Math.random()*2-1)*M;
-        const height=3+(Math.random()*8|0);
-        for(let i=0;i<height;i++){
-          const w=1+(Math.random()*3|0), h=1+(Math.random()*3|0), d=1+(Math.random()*3|0);
-          const ox=(Math.random()<0.35?2:0), oz=(Math.random()<0.35?2:0);
-          addBlockAt(baseX+ox,(i*1.2)+0.6,baseZ+oz,w,h,d);
-        }
-      }
-      updateAllWaterRenderLists(); fitScene(); toast("Shuffled");
+
+    function addStackedBlock(){
+      // 70% stack onto an existing tower; 30% start a new tower
+      const reuse = towerTops.size && Math.random() < 0.70;
+      const cell = reuse ? chooseExistingCell() : chooseNewCell();
+
+      // block dimensions (favor taller pieces for stacking)
+      const w = 1 + (Math.random()*3|0);
+      const d = 1 + (Math.random()*3|0);
+      const h = 1 + (Math.random()*2|0) + (Math.random()<0.35?1:0);  // bias to 2–3
+
+      const y = nextYForCell(cell.x, cell.z, h);
+      return addBlockAt(cell.x, y, cell.z, w, h, d);
     }
 
-    // water — organic polygons via ExtrudePolygon, then rotate flat (no vertical cuts)
+    function addBlock(){ addStackedBlock(); }
+
+    function randomize(){
+      // clear everything
+      blocks.forEach(b=>{ if(b.physicsImpostor) b.physicsImpostor.dispose(); b.dispose(); });
+      blocks.length=0; towerTops.clear();
+
+      // make multiple towers across ground
+      const TOWERS = 10 + (Math.random()*6|0);          // 10..16 towers
+      for (let t=0;t<TOWERS;t++){
+        const base = chooseNewCell();
+        // ensure we register base cell so following floors stack correctly
+        towerTops.set(cellKey(base.x, base.z), 0);
+
+        const FLOORS = 4 + (Math.random()*7|0);          // 4..10 floors
+        for (let i=0;i<FLOORS;i++){
+          const w = 1 + (Math.random()*3|0);
+          const d = 1 + (Math.random()*3|0);
+          const h = 1 + (Math.random()*2|0) + (Math.random()<0.35?1:0);
+          const y = nextYForCell(base.x, base.z, h);
+          addBlockAt(base.x, y, base.z, w, h, d);
+
+          // occasional neighboring buttress (low probability)
+          if (Math.random() < 0.15){
+            const nx = base.x + (Math.random()<0.5 ? GRID : 0);
+            const nz = base.z + (nx===base.x ? GRID : 0);
+            const nh = 1 + (Math.random()*2|0);
+            const ny = nextYForCell(nx||base.x, nz||base.z, nh);
+            addBlockAt(nx||base.x, ny, nz||base.z, 1+(Math.random()*2|0), nh, 1+(Math.random()*2|0));
+          }
+        }
+      }
+
+      updateAllWaterRenderLists();
+      fitScene();
+      toast("Shuffled");
+    }
+
+    // ====== WATER: organic polygons via ExtrudePolygon (flat on ground) ======
     let waterMeshes=[], waterMaterials=[];
     function randomRadialShape(rMin,rMax){
       const N=9+(Math.random()*5|0), pts=[];
@@ -182,8 +243,7 @@
     function createWaterPolygon(cx,cz,rMin,rMax){
       const pts = randomRadialShape(rMin,rMax);
       const poly = BABYLON.MeshBuilder.ExtrudePolygon("water", { shape: pts, depth: 0.04, sideOrientation: BABYLON.Mesh.DOUBLESIDE }, scene);
-      // Lay flat on XZ plane (ground is XZ). +PI/2 points normal DOWN; -PI/2 would point UP — both are flat.
-      poly.rotation.x = Math.PI/2;
+      poly.rotation.x = Math.PI/2;                 // lay flat on XZ plane
       poly.position.set(cx, 0.03, cz);
 
       const mat = new BABYLON.WaterMaterial("waterMat"+Math.random(), scene, new BABYLON.Vector2(256,256));
@@ -207,7 +267,7 @@
       for(let i=0;i<patches;i++){
         const rMin=10+Math.random()*6, rMax=rMin+10+Math.random()*14;
         const offx=(Math.random()-0.5)*14, offz=(Math.random()-0.5)*14;
-        createWaterPolygon(cx+offx,cz+offz,rMin,rMax);
+        createWaterPolygon(snap(cx+offx), snap(cz+offz), rMin, rMax);
       }
       toast("Water added");
     }
@@ -247,18 +307,18 @@
       if(blocks.length){ const b=blocks[(Math.random()*blocks.length|0)]; cx=b.position.x; cz=b.position.z; }
       else { const M=GROUND_SIZE/2-16; cx=(Math.random()*2-1)*M; cz=(Math.random()*2-1)*M; }
       const count=3+(Math.random()*4|0);
-      for(let i=0;i<count;i++){ const x=cx+(Math.random()-0.5)*14, z=cz+(Math.random()-0.5)*14; const t=buildTree(x,z); plants.push(t); }
+      for(let i=0;i<count;i++){ const x=snap(cx+(Math.random()-0.5)*14), z=snap(cz+(Math.random()-0.5)*14); const t=buildTree(x,z); plants.push(t); }
       updateAllWaterRenderLists(); toast("Greenery added");
     }
     function clearPlants(){ plants.forEach(p=>p.dispose()); plants=[]; updateAllWaterRenderLists(); toast("Plants cleared"); }
 
-    // physics — new blocks only (no retroactive jump)
+    // physics — new blocks only
     let physicsOn=false;
     function togglePhysics(){
       physicsOn=!physicsOn;
       if(physicsOn){
         scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.CannonJSPlugin());
-        ground.physicsImpostor=new BABYLON.PhysicsImpostor(ground,BABYLON.PhysicsImpostor.BoxImpostor,{mass:0,restitution:0.1,friction:0.9},scene);
+        ground.physicsImpostor=new BABYLON.PhysicsImpostor(ground,BABYLON.PhysicsImpostor.BoxImpostor,{mass:0,restitution:0.05,friction:0.9},scene);
         document.getElementById("physics").textContent="Physics: On"; toast("Physics on (new blocks only)");
       }else{
         if(ground.physicsImpostor){ground.physicsImpostor.dispose(); ground.physicsImpostor=null;}
@@ -276,8 +336,12 @@
     }
     function loadLayout(){
       const raw=localStorage.getItem("kdf_brutal_layout"); if(!raw) return toast("No save");
-      blocks.forEach(b=>{ if(b.physicsImpostor) b.physicsImpostor.dispose(); b.dispose(); }); blocks.length=0;
-      JSON.parse(raw).forEach(it=>addBlockAt(it.p.x,it.p.y,it.p.z,it.d.w,it.d.h,it.d.z));
+      blocks.forEach(b=>{ if(b.physicsImpostor) b.physicsImpostor.dispose(); b.dispose(); }); blocks.length=0; towerTops.clear();
+      JSON.parse(raw).forEach(it=>{
+        const x=snap(it.p.x), z=snap(it.p.z), h=it.d.h;
+        const k=cellKey(x,z); const top=towerTops.get(k)||0; towerTops.set(k, top+h);
+        addBlockAt(x,it.p.y,z,it.d.w,it.d.h,it.d.z);
+      });
       updateAllWaterRenderLists(); fitScene(); toast("Loaded");
     }
     async function exportGLB(){
@@ -286,7 +350,7 @@
       catch(e){ console.error(e); toast("Export failed"); }
     }
 
-    // camera fit
+    // camera fit (kept; ok if double-tap is finicky)
     function fitScene(){
       if(!blocks.length){ camera.setTarget(new BABYLON.Vector3(0,3,0)); camera.radius=Math.max(26,GROUND_SIZE*0.55); return; }
       let minX=Infinity,minY=Infinity,minZ=Infinity,maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;
@@ -298,7 +362,6 @@
       camera.radius=Math.min(camera.upperRadiusLimit-1, Math.max(18, Math.sqrt(dx*dx+dz*dz)*0.9));
     }
     canvas.addEventListener("dblclick", fitScene);
-    let lastTap=0; canvas.addEventListener("touchend",e=>{ const now=Date.now(); if(now-lastTap<350) fitScene(); lastTap=now; },{passive:true});
 
     // UI
     document.getElementById("add").onclick=()=>addBlock();
