@@ -47,14 +47,17 @@
         <button id="export">Export GLB</button>
         <button id="sun">Sun ↺</button>
         <button id="drama">Drama</button>
+        <button id="water">Water: On</button>
+        <button id="plants">Plants: On</button>
       </div>
     </header>
     <main><canvas id="canvas"></canvas></main>
   </div>
 
-  <!-- Babylon UMD + serializers -->
+  <!-- Babylon UMD + serializers + materials (for WaterMaterial) -->
   <script src="https://cdn.jsdelivr.net/npm/babylonjs@8/babylon.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/babylonjs-serializers@8/babylonjs.serializers.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/babylonjs-materials@8/babylonjs.materials.min.js"></script>
 
   <script>
   (function () {
@@ -62,6 +65,13 @@
     const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
     const scene  = new BABYLON.Scene(engine);
     scene.clearColor = new BABYLON.Color4(0.07, 0.08, 0.09, 1);
+
+    // Env (for metallic to look good) + tone mapping
+    scene.environmentTexture = BABYLON.CubeTexture.CreateFromPrefilteredData(
+      "https://assets.babylonjs.com/environments/environmentSpecular.env", scene
+    );
+    scene.imageProcessingConfiguration.toneMappingEnabled = true;
+    scene.environmentIntensity = 1.1;
 
     // Camera
     const camera = new BABYLON.ArcRotateCamera("cam",
@@ -76,7 +86,7 @@
     // Lights
     const hemi = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0.2, 1, 0), scene); hemi.intensity = 0.6;
     const dir = new BABYLON.DirectionalLight("d", new BABYLON.Vector3(-1, -2, -0.5), scene);
-    dir.position = new BABYLON.Vector3(10, 20, 10); dir.intensity = 0.9;
+    dir.position = new BABYLON.Vector3(10, 20, 10); dir.intensity = 1.2;
 
     // High-quality shadows
     const shadow = new BABYLON.ShadowGenerator(2048, dir);
@@ -85,22 +95,37 @@
     shadow.bias = 0.0005; shadow.normalBias = 0.5;
 
     // Ground
-    const ground = BABYLON.MeshBuilder.CreateGround("g", { width: 80, height: 80 }, scene);
+    const ground = BABYLON.MeshBuilder.CreateGround("g", { width: 120, height: 120 }, scene);
     ground.receiveShadows = true;
     const gmat = new BABYLON.PBRMaterial("gmat", scene);
     gmat.metallic = 0.0; gmat.roughness = 0.95;
     gmat.albedoColor = new BABYLON.Color3(0.08, 0.09, 0.10);
     ground.material = gmat;
 
-    // PBR "concrete" helper
-    function makeConcrete(scene) {
+    // Muted palette (greys, slate, taupe, olive)
+    const hex = (h)=>BABYLON.Color3.FromHexString(h);
+    const PALETTE = [
+      "#8a8f93","#7b7f82","#6e6a66","#7f7a70","#717b77",
+      "#5b6065","#8d8277","#767c7a","#9a9ea1","#6c716d"
+    ];
+
+    // PBR helper: mix metallic/matte + muted color
+    function makeBlockMaterial(scene){
       const m = new BABYLON.PBRMaterial("m" + Math.random(), scene);
-      m.metallic = 0.06; m.roughness = 0.55;
-      const c = 0.55 + Math.random()*0.12;
-      m.albedoColor = new BABYLON.Color3(c, c, c);
-      // subtle color bias for character
-      const tint = 0.02 * (Math.random() - 0.5);
-      m.albedoColor.g += tint; m.albedoColor.b -= tint;
+      // pick muted color & apply small random tint
+      const base = PALETTE[(Math.random()*PALETTE.length)|0];
+      const c = hex(base);
+      const jitter = (v)=>Math.max(0, Math.min(1, v + (Math.random()-0.5)*0.06));
+      m.albedoColor = new BABYLON.Color3(jitter(c.r), jitter(c.g), jitter(c.b));
+
+      const metallicChance = Math.random(); // ~35% metallic
+      if (metallicChance < 0.35){
+        m.metallic  = 0.85 + Math.random()*0.15;
+        m.roughness = 0.18 + Math.random()*0.18;
+      } else {
+        m.metallic  = 0.03 + Math.random()*0.06;
+        m.roughness = 0.55 + Math.random()*0.25;
+      }
       return m;
     }
 
@@ -111,32 +136,48 @@
       const h = opts.h || (1 + Math.floor(Math.random()*6));
       const d = opts.d || (1 + Math.floor(Math.random()*3));
       const mesh = BABYLON.MeshBuilder.CreateBox("b", { width:w, height:h, depth:d }, scene);
-      mesh.material = makeConcrete(scene);
-      const gx = (Math.floor((Math.random()*10 - 5)))*2;
-      const gz = (Math.floor((Math.random()*10 - 5)))*2;
+      mesh.material = makeBlockMaterial(scene);
+      const gx = (Math.floor((Math.random()*8 - 4)))*2;
+      const gz = (Math.floor((Math.random()*8 - 4)))*2;
       mesh.position.set(gx, h/2, gz);
       mesh.rotation.y = (Math.random() - 0.5) * 0.12;
       shadow.addShadowCaster(mesh, true);
       blocks.push(mesh);
+      // if water exists, reflect blocks
+      if (waterMat) waterMat.addToRenderList(mesh);
       return mesh;
     }
 
-    // "Better shuffle": clustered towers + offsets
+    // "Towers" shuffle
     function randomize() {
+      // dispose blocks
       blocks.forEach(b => b.dispose()); blocks.length = 0;
+      // dispose plants (regenerate later)
+      disposePlants();
+      // rebuild towers
       const towers = 6 + Math.floor(Math.random()*6);
       for (let t=0; t<towers; t++){
         const baseX = (Math.floor((Math.random()*8 - 4)))*2;
         const baseZ = (Math.floor((Math.random()*8 - 4)))*2;
         const height = 3 + Math.floor(Math.random()*8);
         for (let i=0; i<height; i++){
-          addBlock({ w: 1 + Math.floor(Math.random()*3), h: 1 + Math.floor(Math.random()*3), d: 1 + Math.floor(Math.random()*3) })
-            .position.set(baseX + (Math.random()<0.35?2:0), (i*1.2)+0.6, baseZ + (Math.random()<0.35?2:0));
+          addBlock({
+            w: 1 + Math.floor(Math.random()*3),
+            h: 1 + Math.floor(Math.random()*3),
+            d: 1 + Math.floor(Math.random()*3)
+          }).position.set(
+            baseX + (Math.random()<0.35?2:0),
+            (i*1.2)+0.6,
+            baseZ + (Math.random()<0.35?2:0)
+          );
         }
       }
+      // rebuild plants/water if toggled on
+      if (plantsOn) createPlants();
+      if (waterOn)  createWater();
     }
 
-    // Save/Load/Export
+    // Save/Load/Export (blocks only)
     function saveLayout() {
       const data = blocks.map(b => ({
         p:{x:b.position.x, y:b.position.y, z:b.position.z},
@@ -156,12 +197,13 @@
       blocks.forEach(b => b.dispose()); blocks.length = 0;
       JSON.parse(raw).forEach(it => {
         const mesh = BABYLON.MeshBuilder.CreateBox("b", { width:it.d.w, height:it.d.h, depth:it.d.z }, scene);
-        mesh.material = makeConcrete(scene);
+        mesh.material = makeBlockMaterial(scene);
         mesh.position.set(it.p.x, it.p.y, it.p.z);
         mesh.rotation.set(it.r.x, it.r.y, it.r.z);
         shadow.addShadowCaster(mesh, true);
         blocks.push(mesh);
       });
+      if (waterOn) createWater(); // rebuild reflection list
       toast("Loaded");
     }
     async function exportGLB(){
@@ -172,17 +214,20 @@
       }catch(e){ console.error(e); toast("Export failed"); }
     }
 
-    // Post FX: FXAA + toggleable "Drama" (bloom, vignette, contrast)
+    // Post FX: FXAA + toggleable "Drama"
     const pipeline = new BABYLON.DefaultRenderingPipeline("dp", true, scene, [camera]);
     pipeline.fxaaEnabled = true;
     function setDrama(on){
       pipeline.bloomEnabled = on;
-      pipeline.bloomThreshold = 0.8; pipeline.bloomWeight = 0.28; pipeline.bloomKernel = 40; pipeline.bloomScale = 0.5;
+      pipeline.bloomThreshold = 0.55;
+      pipeline.bloomWeight   = 0.65;
+      pipeline.bloomKernel   = 96;
+      pipeline.bloomScale    = 1.0;
       const ip = scene.imageProcessingConfiguration;
-      ip.vignetteEnabled = on; ip.vignetteWeight = 0.9; ip.vignetteStretch = 0.5;
+      ip.vignetteEnabled = on; ip.vignetteWeight = 1.4; ip.vignetteStretch = 0.6;
       ip.vignetteColor = new BABYLON.Color4(0,0,0,1);
       ip.vignetteBlendMode = BABYLON.ImageProcessingConfiguration.VIGNETTEMODE_MULTIPLY;
-      ip.contrast = on ? 1.18 : 1.0; ip.exposure = on ? 1.05 : 1.0;
+      ip.contrast = on ? 1.25 : 1.0; ip.exposure = on ? 1.20 : 1.0;
     }
     let drama = true; setDrama(drama);
 
@@ -193,6 +238,89 @@
       const x = Math.cos(sunAngle), z = Math.sin(sunAngle);
       dir.direction = new BABYLON.Vector3(-x, -2, -0.5*z).normalize();
       toast("Sun rotated");
+    }
+
+    // ---- Water ----
+    let waterMesh = null, waterMat = null, waterOn = true;
+    function createWater(){
+      disposeWater();
+      // pool off-center so towers silhouette against it
+      const size = { w: 60, h: 36 };
+      const plane = BABYLON.MeshBuilder.CreateGround("water", { width: size.w, height: size.h }, scene);
+      plane.position = new BABYLON.Vector3(-10, 0.02, 12);
+      const mat = new BABYLON.WaterMaterial("waterMat", scene, new BABYLON.Vector2(256,256));
+      mat.bumpTexture = new BABYLON.Texture("https://assets.babylonjs.com/textures/waterbump.png", scene);
+      mat.windForce = 4; mat.waveHeight = 0.18;
+      mat.windDirection = new BABYLON.Vector2(1, 1);
+      mat.colorBlendFactor = 0.15;
+      mat.alpha = 0.9; // slightly transparent
+      plane.material = mat;
+
+      // reflect ground + blocks
+      mat.addToRenderList(ground);
+      blocks.forEach(b => mat.addToRenderList(b));
+
+      waterMesh = plane; waterMat = mat;
+    }
+    function disposeWater(){
+      if (waterMesh){ waterMesh.dispose(); waterMesh = null; }
+      waterMat = null;
+    }
+
+    // ---- Plants (low-poly trees) ----
+    let plants = [], plantsOn = true;
+    function buildTree(x, z){
+      const trunkH = 0.8 + Math.random()*0.6;
+      const trunk = BABYLON.MeshBuilder.CreateCylinder("trunk", { diameter: 0.14, height: trunkH }, scene);
+      trunk.position.set(x, trunkH/2, z);
+      const tmat = new BABYLON.PBRMaterial("tmat"+Math.random(), scene);
+      tmat.albedoColor = new BABYLON.Color3(0.28,0.22,0.18); tmat.metallic = 0.0; tmat.roughness = 0.8;
+      trunk.material = tmat;
+
+      const blob = (y, r, tint)=> {
+        const s = BABYLON.MeshBuilder.CreateIcoSphere("leaf", { radius: r, subdivisions: 2 }, scene);
+        s.position.set(x, y, z);
+        const m = new BABYLON.PBRMaterial("lmat"+Math.random(), scene);
+        // muted greens
+        const base = [
+          new BABYLON.Color3(0.28,0.35,0.30),
+          new BABYLON.Color3(0.30,0.38,0.32),
+          new BABYLON.Color3(0.32,0.40,0.34),
+          new BABYLON.Color3(0.26,0.33,0.28)
+        ][(Math.random()*4)|0];
+        m.albedoColor = new BABYLON.Color3(
+          Math.min(1, base.r + tint*(Math.random()-0.5)),
+          Math.min(1, base.g + tint*(Math.random()-0.5)),
+          Math.min(1, base.b + tint*(Math.random()-0.5))
+        );
+        m.metallic = 0.0; m.roughness = 0.5;
+        s.material = m;
+        return s;
+      };
+
+      const l1 = blob(trunkH + 0.35, 0.55 + Math.random()*0.15, 0.06);
+      const l2 = blob(trunkH + 0.85, 0.42 + Math.random()*0.12, 0.06);
+      const l3 = blob(trunkH + 1.20, 0.30 + Math.random()*0.10, 0.06);
+
+      // group under a TransformNode for easy cleanup
+      const tree = new BABYLON.TransformNode("tree", scene);
+      [trunk,l1,l2,l3].forEach(m => m.parent = tree);
+      return tree;
+    }
+    function createPlants(){
+      disposePlants();
+      // scatter around periphery so they don't crowd towers/water
+      const spots = [];
+      const want = 12;
+      while (spots.length < want){
+        const x = (Math.random()<0.5 ? -1 : 1) * (18 + Math.random()*32);
+        const z = (Math.random()<0.5 ? -1 : 1) * (18 + Math.random()*32);
+        spots.push([x,z]);
+      }
+      spots.forEach(([x,z]) => plants.push(buildTree(x,z)));
+    }
+    function disposePlants(){
+      plants.forEach(p => p.dispose()); plants = [];
     }
 
     // Toast
@@ -216,9 +344,22 @@
     document.getElementById("export").onclick = () => exportGLB();
     document.getElementById("sun").onclick    = () => rotateSun();
     document.getElementById("drama").onclick  = () => { drama = !drama; setDrama(drama); toast(drama ? "Drama on" : "Drama off"); };
+    document.getElementById("water").onclick  = (e) => {
+      waterOn = !waterOn;
+      if (waterOn) createWater(); else disposeWater();
+      e.target.textContent = "Water: " + (waterOn ? "On" : "Off");
+    };
+    document.getElementById("plants").onclick = (e) => {
+      plantsOn = !plantsOn;
+      if (plantsOn) createPlants(); else disposePlants();
+      e.target.textContent = "Plants: " + (plantsOn ? "On" : "Off");
+    };
 
     // Go
-    randomize();
+    randomize();            // builds towers
+    if (plantsOn) createPlants();
+    if (waterOn)  createWater();
+
     const resize = () => engine.resize();
     window.addEventListener("resize", resize);
     window.addEventListener("orientationchange", resize);
