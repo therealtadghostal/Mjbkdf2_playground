@@ -40,22 +40,24 @@
     <main><canvas id="canvas"></canvas></main>
   </div>
 
-  <!-- Babylon + serializers + materials (WaterMaterial) + earcut for polygon water + cannon for physics -->
+  <!-- Babylon + extras -->
   <script src="https://cdn.jsdelivr.net/npm/babylonjs@8/babylon.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/babylonjs-serializers@8/babylonjs.serializers.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/babylonjs-materials@8/babylonjs.materials.min.js"></script>
+  <!-- earcut is required by PolygonMeshBuilder for polygon water -->
   <script src="https://cdn.jsdelivr.net/npm/earcut@2.2.4/dist/earcut.min.js"></script>
+  <!-- optional physics backend -->
   <script src="https://cdn.babylonjs.com/cannon.js"></script>
 
   <script>
-  (function () {
-    // ---------- scene ----------
+  (function(){
+    // --- engine / scene ---
     const canvas = document.getElementById("canvas");
     const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true });
     const scene  = new BABYLON.Scene(engine);
     scene.clearColor = new BABYLON.Color4(0.07,0.08,0.09,1);
 
-    // environment + tone mapping (helps metals & drama)
+    // env (metals look better) + tone map
     scene.environmentTexture = BABYLON.CubeTexture.CreateFromPrefilteredData(
       "https://assets.babylonjs.com/environments/environmentSpecular.env", scene
     );
@@ -66,28 +68,26 @@
     const camera = new BABYLON.ArcRotateCamera("cam",
       Math.PI*0.25, Math.PI*0.33, 36, new BABYLON.Vector3(0,3,0), scene);
     camera.lowerRadiusLimit = 6;
-    camera.upperRadiusLimit = 999;      // wide zoom-out
-    camera.maxZ = 5000;                 // far plane so we can see everything
+    camera.upperRadiusLimit = 999;
+    camera.maxZ = 5000;
     camera.panningSensibility = 1200;
     camera.wheelPrecision = 40;
     camera.pinchDeltaPercentage = 0.01;
     camera.useNaturalPinchZoom = true;
-    camera.inertia = 0.85;
-    camera.panningInertia = 0.9;
+    camera.inertia = 0.85; camera.panningInertia = 0.9;
     camera.attachControl(canvas, true);
 
-    // lights
+    // lights + shadows
     const hemi = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0.2,1,0), scene); hemi.intensity = 0.55;
     const dir  = new BABYLON.DirectionalLight("d", new BABYLON.Vector3(-1,-2,-0.5), scene);
     dir.position = new BABYLON.Vector3(10,22,10); dir.intensity = 1.2;
 
-    // shadows
     const shadow = new BABYLON.ShadowGenerator(2048, dir);
     shadow.useCloseExponentialShadowMap = true;
     shadow.filteringQuality = BABYLON.ShadowGenerator.QUALITY_HIGH;
     shadow.bias = 0.0005; shadow.normalBias = 0.5;
 
-    // ground (slightly smaller than before)
+    // ground (slightly smaller so you can frame it all)
     const GROUND_SIZE = 110;
     const ground = BABYLON.MeshBuilder.CreateGround("g", { width:GROUND_SIZE, height:GROUND_SIZE }, scene);
     ground.receiveShadows = true;
@@ -95,81 +95,75 @@
     gmat.metallic = 0.0; gmat.roughness = 0.95; gmat.albedoColor = new BABYLON.Color3(0.08,0.09,0.10);
     ground.material = gmat;
 
-    // post FX
+    // post FX — stronger drama
     const pipeline = new BABYLON.DefaultRenderingPipeline("dp", true, scene, [camera]);
     pipeline.fxaaEnabled = true;
     function setDrama(on){
       pipeline.bloomEnabled = on;
-      pipeline.bloomThreshold = on ? 0.40 : 0.90;   // lower = stronger
+      pipeline.bloomThreshold = on ? 0.40 : 0.90;
       pipeline.bloomWeight   = on ? 0.80 : 0.20;
       pipeline.bloomKernel   = on ? 128  : 32;
       pipeline.bloomScale    = on ? 1.0  : 0.5;
       const ip = scene.imageProcessingConfiguration;
-      ip.vignetteEnabled = on;
-      ip.vignetteWeight  = on ? 1.6 : 0.0;
-      ip.vignetteStretch = on ? 0.6 : 0.0;
-      ip.vignetteColor   = new BABYLON.Color4(0,0,0,1);
+      ip.vignetteEnabled = on; ip.vignetteWeight = on ? 1.6 : 0;
+      ip.vignetteStretch = on ? 0.6 : 0; ip.vignetteColor = new BABYLON.Color4(0,0,0,1);
       ip.vignetteBlendMode = BABYLON.ImageProcessingConfiguration.VIGNETTEMODE_MULTIPLY;
-      ip.contrast = on ? 1.32 : 1.0;
-      ip.exposure = on ? 1.22 : 1.0;
+      ip.contrast = on ? 1.32 : 1.0; ip.exposure = on ? 1.22 : 1.0;
     }
     let drama = true; setDrama(drama);
 
-    // ---------- toast (never gets stuck) ----------
-    let toastEl = null, toastTimer = null;
+    // toast (single element; never sticks)
+    let toastEl=null, toastTimer=null;
     function toast(msg){
       if (!toastEl){
         toastEl = document.createElement("div");
-        Object.assign(toastEl.style,{
-          position:"fixed", bottom:"72px", left:"50%", transform:"translateX(-50%)",
-          background:"rgba(30,30,34,.9)", color:"#fff",
-          padding:"8px 12px", borderRadius:"10px", fontSize:"13px", zIndex:99999
-        });
+        Object.assign(toastEl.style,{ position:"fixed", bottom:"72px", left:"50%", transform:"translateX(-50%)",
+          background:"rgba(30,30,34,.9)", color:"#fff", padding:"8px 12px", borderRadius:"10px",
+          fontSize:"13px", zIndex:99999 });
         document.body.appendChild(toastEl);
       }
       toastEl.textContent = msg;
       clearTimeout(toastTimer);
-      toastTimer = setTimeout(()=>{ if(toastEl){ toastEl.remove(); toastEl=null; } }, 1200);
+      toastTimer = setTimeout(()=>{ toastEl.remove(); toastEl=null; }, 1200);
     }
 
-    // ---------- materials ----------
+    // materials
     const PALETTE = ["#8a8f93","#7b7f82","#6e6a66","#7f7a70","#717b77","#5b6065","#8d8277","#767c7a","#9a9ea1","#6c716d"];
     const hex = (h)=>BABYLON.Color3.FromHexString(h);
-    function makeBlockMaterial(scene){
+    function makeBlockMaterial(){
       const m = new BABYLON.PBRMaterial("m"+Math.random(), scene);
       const base = PALETTE[(Math.random()*PALETTE.length)|0];
       const c = hex(base);
       const jit = v => Math.max(0, Math.min(1, v + (Math.random()-0.5)*0.06));
       m.albedoColor = new BABYLON.Color3(jit(c.r), jit(c.g), jit(c.b));
-      if (Math.random() < 0.35){ m.metallic = 0.85 + Math.random()*0.15; m.roughness = 0.18 + Math.random()*0.18; }
-      else { m.metallic = 0.04 + Math.random()*0.06; m.roughness = 0.55 + Math.random()*0.25; }
+      if (Math.random() < 0.35){ m.metallic=0.88; m.roughness=0.25; } else { m.metallic=0.06; m.roughness=0.62; }
       return m;
     }
 
-    // ---------- blocks ----------
+    // blocks
     const blocks = [];
-    function addBlockAt(x, y, z, w, h, d){
+    let physicsOn = false;
+    function addBlockAt(x,y,z,w,h,d){
       const mesh = BABYLON.MeshBuilder.CreateBox("b", { width:w, height:h, depth:d }, scene);
-      mesh.material = makeBlockMaterial(scene);
-      mesh.position.set(x, y, z);
+      mesh.material = makeBlockMaterial();
+      mesh.position.set(x,y,z);
       mesh.rotation.y = (Math.random()-0.5)*0.12;
       shadow.addShadowCaster(mesh, true);
       blocks.push(mesh);
       waterMaterials.forEach(mat => mat.addToRenderList(mesh));
-      if (physicsOn){               // physics applies only to NEW blocks
+      if (physicsOn){
         mesh.physicsImpostor = new BABYLON.PhysicsImpostor(mesh, BABYLON.PhysicsImpostor.BoxImpostor,
-          { mass: 2, restitution: 0.1, friction: 0.6 }, scene);
+          { mass:2, restitution:0.1, friction:0.6 }, scene);
       }
       return mesh;
     }
-    function addBlock(opts = {}){
+    function addBlock(opts={}){
       const w = opts.w || (1 + Math.floor(Math.random()*3));
       const h = opts.h || (1 + Math.floor(Math.random()*6));
       const d = opts.d || (1 + Math.floor(Math.random()*3));
       const M = GROUND_SIZE/2 - 10;
-      const x = (Math.random()*2-1)*M;
-      const z = (Math.random()*2-1)*M;
-      return addBlockAt(x, h/2, z, w, h, d);
+      const x = (Math.random()*2-1)*M, z = (Math.random()*2-1)*M;
+      return addBlockAt(x, h/2, z, w,h,d);
     }
     function randomize(){
       blocks.forEach(b => { if (b.physicsImpostor) b.physicsImpostor.dispose(); b.dispose(); });
@@ -177,14 +171,11 @@
       const towers = 8 + Math.floor(Math.random()*8);
       for (let t=0; t<towers; t++){
         const M = GROUND_SIZE/2 - 14;
-        const baseX = (Math.random()*2-1)*M;
-        const baseZ = (Math.random()*2-1)*M;
+        const baseX = (Math.random()*2-1)*M, baseZ = (Math.random()*2-1)*M;
         const height = 3 + Math.floor(Math.random()*8);
-        for (let i=0; i<height; i++){
-          const w = 1 + Math.floor(Math.random()*3);
-          const h = 1 + Math.floor(Math.random()*3);
-          const d = 1 + Math.floor(Math.random()*3);
-          const ox = (Math.random()<0.35?2:0), oz = (Math.random()<0.35?2:0);
+        for (let i=0;i<height;i++){
+          const w=1+Math.floor(Math.random()*3), h=1+Math.floor(Math.random()*3), d=1+Math.floor(Math.random()*3);
+          const ox=(Math.random()<0.35?2:0), oz=(Math.random()<0.35?2:0);
           addBlockAt(baseX+ox, (i*1.2)+0.6, baseZ+oz, w,h,d);
         }
       }
@@ -193,30 +184,26 @@
       toast("Shuffled");
     }
 
-    // ---------- water (organic polygons) ----------
-    let waterMeshes = [], waterMaterials = [];
-    function randomPolygonPoints(radiusMin, radiusMax, segments){
+    // water (organic extruded polygons; no z-fighting)
+    let waterMeshes=[], waterMaterials=[];
+    function createWaterPolygon(cx, cz, rMin, rMax){
+      const N = 9 + (Math.random()*5|0); // 9..13 verts
       const pts = [];
-      const N = segments || (8 + (Math.random()*6|0)); // 8..13 points
       for (let i=0;i<N;i++){
-        const a = (i/N) * Math.PI*2 + (Math.random()-0.5)*0.2;
-        const r = radiusMin + Math.random()*(radiusMax - radiusMin);
+        const a = (i/N)*Math.PI*2 + (Math.random()-0.5)*0.12;
+        const r = rMin + Math.random()*(rMax - rMin);
         pts.push(new BABYLON.Vector2(Math.cos(a)*r, Math.sin(a)*r));
       }
-      return pts;
-    }
-    function createWaterPolygon(cx, cz, rMin, rMax){
-      const shape = randomPolygonPoints(rMin, rMax);
-      const poly = BABYLON.MeshBuilder.CreatePolygon("wpoly", { shape, sideOrientation: BABYLON.Mesh.DOUBLESIDE }, scene);
-      // polygon is in XY plane with normal +Z; rotate to lie flat (normal +Y)
+      const builder = new BABYLON.PolygonMeshBuilder("wpoly"+Math.random(), pts, scene, earcut);
+      const poly = builder.build(true, 0.04);   // thin depth avoids z-fighting
       poly.rotation.x = -Math.PI/2;
-      poly.position.set(cx, 0.02, cz);
+      poly.position.set(cx, 0.03, cz);
 
       const mat = new BABYLON.WaterMaterial("waterMat"+Math.random(), scene, new BABYLON.Vector2(256,256));
       mat.bumpTexture = new BABYLON.Texture("https://assets.babylonjs.com/textures/waterbump.png", scene);
-      mat.windForce = 3.5; mat.waveHeight = 0.16;
-      mat.windDirection = new BABYLON.Vector2(1, 1);
-      mat.colorBlendFactor = 0.15; mat.alpha = 0.9;
+      mat.bumpTexture.uScale = mat.bumpTexture.vScale = 0.6;
+      mat.windForce = 3.5; mat.waveHeight = 0.16; mat.windDirection = new BABYLON.Vector2(1,1);
+      mat.colorBlendFactor = 0.15; mat.alpha = 0.9; mat.backFaceCulling = false;
 
       poly.material = mat; mat.addToRenderList(ground);
       blocks.forEach(b => mat.addToRenderList(b));
@@ -228,158 +215,4 @@
     function addWaterCluster(){
       let cx=0, cz=0;
       if (blocks.length){ const b = blocks[(Math.random()*blocks.length)|0]; cx = b.position.x + (Math.random()-0.5)*10; cz = b.position.z + (Math.random()-0.5)*10; }
-      else { const M = GROUND_SIZE/2 - 18; cx = (Math.random()*2-1)*M; cz = (Math.random()*2-1)*M; }
-      const patches = 1 + (Math.random()*2|0); // 1..2 organic patches per click
-      for (let i=0;i<patches;i++){
-        const rMin = 10 + Math.random()*6;  // inner radius
-        const rMax = rMin + 10 + Math.random()*14; // outer radius
-        const offx = (Math.random()-0.5)*14, offz = (Math.random()-0.5)*14;
-        createWaterPolygon(cx+offx, cz+offz, rMin, rMax);
-      }
-      toast("Water added");
-    }
-    function clearWater(){
-      waterMeshes.forEach(m => m.dispose());
-      waterMeshes.length = 0; waterMaterials.length = 0;
-      toast("Water cleared");
-    }
-    function updateAllWaterRenderLists(){
-      waterMaterials.forEach(mat=>{
-        mat.renderList = [ground];
-        blocks.forEach(b => mat.addToRenderList(b));
-        plants.forEach(p => p.getChildMeshes().forEach(m => mat.addToRenderList(m)));
-      });
-    }
-
-    // ---------- plants (near buildings) ----------
-    let plants = [];
-    function buildTree(x, z){
-      const trunkH = 0.8 + Math.random()*0.6;
-      const trunk = BABYLON.MeshBuilder.CreateCylinder("trunk", { diameter:0.14, height:trunkH }, scene);
-      trunk.position.set(x, trunkH/2, z);
-      const tmat = new BABYLON.PBRMaterial("tmat"+Math.random(), scene);
-      tmat.albedoColor = new BABYLON.Color3(0.28,0.22,0.18); tmat.metallic = 0.0; tmat.roughness = 0.8;
-      trunk.material = tmat;
-
-      const group = new BABYLON.TransformNode("tree", scene);
-      trunk.parent = group;
-
-      function leaf(y, r){
-        const s = BABYLON.MeshBuilder.CreateIcoSphere("leaf", { radius:r, subdivisions:2 }, scene);
-        s.position.set(x + (Math.random()-0.5)*0.15, y, z + (Math.random()-0.5)*0.15);
-        const m = new BABYLON.PBRMaterial("lmat"+Math.random(), scene);
-        const greens = [new BABYLON.Color3(0.28,0.35,0.30),new BABYLON.Color3(0.30,0.38,0.32),new BABYLON.Color3(0.32,0.40,0.34),new BABYLON.Color3(0.26,0.33,0.28)];
-        const base = greens[(Math.random()*greens.length)|0];
-        m.albedoColor = new BABYLON.Color3(base.r + (Math.random()-0.5)*0.04, base.g + (Math.random()-0.5)*0.04, base.b + (Math.random()-0.5)*0.04);
-        m.metallic = 0.0; m.roughness = 0.5;
-        s.material = m; s.parent = group;
-      }
-      leaf(trunkH + 0.35, 0.55 + Math.random()*0.15);
-      leaf(trunkH + 0.85, 0.42 + Math.random()*0.12);
-      leaf(trunkH + 1.20, 0.30 + Math.random()*0.10);
-      return group;
-    }
-    function addGreeneryCluster(){
-      let cx=0, cz=0;
-      if (blocks.length){ const b = blocks[(Math.random()*blocks.length)|0]; cx = b.position.x; cz = b.position.z; }
-      else { const M = GROUND_SIZE/2 - 16; cx = (Math.random()*2-1)*M; cz = (Math.random()*2-1)*M; }
-      const count = 3 + (Math.random()*4|0);
-      for (let i=0;i<count;i++){
-        const x = cx + (Math.random()-0.5)*14;
-        const z = cz + (Math.random()-0.5)*14;
-        const t = buildTree(x,z); plants.push(t);
-      }
-      updateAllWaterRenderLists();
-      toast("Greenery added");
-    }
-    function clearPlants(){
-      plants.forEach(p => p.dispose()); plants = [];
-      updateAllWaterRenderLists(); toast("Plants cleared");
-    }
-
-    // ---------- physics (new blocks only; no retrofits so nothing jumps) ----------
-    let physicsOn = false;
-    function togglePhysics(){
-      physicsOn = !physicsOn;
-      if (physicsOn){
-        scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.CannonJSPlugin());
-        ground.physicsImpostor = new BABYLON.PhysicsImpostor(ground, BABYLON.PhysicsImpostor.BoxImpostor, { mass:0, restitution:0.1, friction:0.9 }, scene);
-        document.getElementById("physics").textContent = "Physics: On";
-        toast("Physics on (new blocks only)");
-      } else {
-        if (ground.physicsImpostor){ ground.physicsImpostor.dispose(); ground.physicsImpostor = null; }
-        blocks.forEach(b=>{ if (b.physicsImpostor){ b.physicsImpostor.dispose(); b.physicsImpostor = null; }});
-        scene.disablePhysicsEngine();
-        document.getElementById("physics").textContent = "Physics: Off";
-        toast("Physics off");
-      }
-    }
-
-    // ---------- save / load / export ----------
-    function saveLayout(){
-      const data = blocks.map(b => ({
-        p:{x:b.position.x, y:b.position.y, z:b.position.z},
-        r:{x:b.rotation.x, y:b.rotation.y, z:b.rotation.z},
-        d:{ w:b.getBoundingInfo().boundingBox.extendSizeWorld.x*2,
-            h:b.getBoundingInfo().boundingBox.extendSizeWorld.y*2,
-            z:b.getBoundingInfo().boundingBox.extendSizeWorld.z*2 }
-      }));
-      localStorage.setItem("kdf_brutal_layout", JSON.stringify(data)); toast("Saved");
-    }
-    function loadLayout(){
-      const raw = localStorage.getItem("kdf_brutal_layout"); if(!raw) return toast("No save");
-      blocks.forEach(b => { if (b.physicsImpostor) b.physicsImpostor.dispose(); b.dispose(); });
-      blocks.length = 0;
-      JSON.parse(raw).forEach(it => addBlockAt(it.p.x, it.p.y, it.p.z, it.d.w, it.d.h, it.d.z));
-      updateAllWaterRenderLists(); fitScene(); toast("Loaded");
-    }
-    async function exportGLB(){
-      if (!BABYLON.GLTF2Export) return toast("Serializer missing");
-      try { const result = await BABYLON.GLTF2Export.GLBAsync(scene, "brutalist-playground"); result.downloadFiles(); toast("Exported .glb"); }
-      catch(e){ console.error(e); toast("Export failed"); }
-    }
-
-    // ---------- camera fit (double-tap canvas) ----------
-    function fitScene(){
-      if (!blocks.length){ camera.setTarget(new BABYLON.Vector3(0,3,0)); camera.radius = Math.max(26, GROUND_SIZE*0.55); return; }
-      let minX=Infinity,minY=Infinity,minZ=Infinity,maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;
-      blocks.forEach(b=>{
-        const bb = b.getBoundingInfo().boundingBox;
-        const vmin = bb.minimumWorld, vmax = bb.maximumWorld;
-        minX=Math.min(minX,vmin.x); minY=Math.min(minY,vmin.y); minZ=Math.min(minZ,vmin.z);
-        maxX=Math.max(maxX,vmax.x); maxY=Math.max(maxY,vmax.y); maxZ=Math.max(maxZ,vmax.z);
-      });
-      const cx=(minX+maxX)/2, cy=(minY+maxY)/2, cz=(minZ+maxZ)/2;
-      const dx=maxX-minX, dz=maxZ-minZ;
-      camera.setTarget(new BABYLON.Vector3(cx, Math.max(2, cy), cz));
-      camera.radius = Math.min(camera.upperRadiusLimit-1, Math.max(18, Math.sqrt(dx*dx+dz*dz)*0.9));
-    }
-    canvas.addEventListener("dblclick", fitScene);
-
-    // ---------- UI ----------
-    document.getElementById("add").onclick        = () => addBlock();
-    document.getElementById("rand").onclick       = () => randomize();
-    document.getElementById("save").onclick       = () => saveLayout();
-    document.getElementById("load").onclick       = () => loadLayout();
-    document.getElementById("export").onclick     = () => exportGLB();
-    document.getElementById("sun").onclick        = () => {
-      const now = performance.now()/1000; const x=Math.cos(now), z=Math.sin(now);
-      dir.direction = new BABYLON.Vector3(-x,-2,-0.5*z).normalize(); toast("Sun rotated");
-    };
-    document.getElementById("drama").onclick      = () => { drama=!drama; setDrama(drama); toast(drama?"Drama on":"Drama off"); };
-    document.getElementById("addWater").onclick   = () => addWaterCluster();
-    document.getElementById("clearWater").onclick = () => clearWater();
-    document.getElementById("addPlants").onclick  = () => addGreeneryCluster();
-    document.getElementById("clearPlants").onclick= () => clearPlants();
-    document.getElementById("physics").onclick    = () => togglePhysics();
-
-    // boot
-    randomize();
-    const resize = () => engine.resize();
-    window.addEventListener("resize", resize);
-    window.addEventListener("orientationchange", resize);
-    engine.runRenderLoop(() => scene.render());
-  })();
-  </script>
-</body>
-</html>
+      else { const M = GROUND_SIZE/2 - 18; cx = (Math.random()*2-1
