@@ -7,65 +7,68 @@
   <style>
     :root{
       --safe-top: env(safe-area-inset-top, 0px);
-      --safe-bottom: env(safe-area-inset-bottom, 0px);
       --bar-bg: rgba(16,16,18,.65);
     }
     html, body { height: 100%; margin: 0; background:#0b0c0d; color:#e8e8e8; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
 
-    /* 3-row grid: header / main / footer. Using svh to respect Safari’s visible height. */
+    /* 2-row grid: header (auto) / main (fills). Using svh/dvh for iOS 16+ bars. */
     #app{
       height: 100vh; height: 100dvh; height: 100svh;
       display: grid;
-      grid-template-rows: max-content 1fr max-content;
+      grid-template-rows: max-content 1fr;
+      overflow: hidden;
     }
 
-    header, footer{
+    header{
       background: var(--bar-bg);
       -webkit-backdrop-filter: saturate(120%) blur(6px);
       backdrop-filter: saturate(120%) blur(6px);
-      padding: 10px 12px;
+      padding: calc(10px + var(--safe-top)) 12px 10px 12px;
+      display: grid;
+      gap: 8px;
     }
-    header{ padding-top: calc(10px + var(--safe-top)); font-weight: 600; letter-spacing: .2px; }
-    footer{ padding-bottom: calc(12px + var(--safe-bottom)); }
+    header .title{ font-weight: 600; letter-spacing: .2px; }
 
-    /* Canvas lives in the middle grid cell and cannot overlap header/footer */
+    /* Buttons row scrolls horizontally on small screens */
+    #ui{
+      display: grid;
+      grid-auto-flow: column;
+      gap: 8px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    button{
+      font-size: 16px; padding: 10px 12px;
+      border-radius: 12px; border: 0;
+      background:#1c1f23; color:#fff; white-space: nowrap;
+    }
+    button:active{ transform: translateY(1px); }
+
     main{ position: relative; overflow: hidden; }
     #canvas{
       width: 100%; height: 100%;
       display: block; outline: none;
-      touch-action: none;
+      touch-action: none;           /* let Babylon own gestures */
       -webkit-user-select: none; user-select: none;
     }
-
-    /* Footer UI */
-    #ui{ display: grid; grid-auto-flow: column; gap: 8px; overflow-x:auto; -webkit-overflow-scrolling: touch; }
-    button{
-      font-size:16px; padding:12px 14px;
-      border-radius:12px; border:0; background:#1c1f23; color:#fff; white-space:nowrap;
-    }
-    button:active{ transform: translateY(1px); }
   </style>
 </head>
 <body>
   <div id="app">
-    <header>Brutalist Builder — touch to orbit, pinch to zoom</header>
-
-    <main>
-      <canvas id="canvas"></canvas>
-    </main>
-
-    <footer>
+    <header>
+      <div class="title">Brutalist Builder — touch to orbit, pinch to zoom</div>
       <div id="ui">
         <button id="add">New Block</button>
         <button id="rand">Randomize</button>
         <button id="save">Save</button>
         <button id="load">Load</button>
         <button id="export">Export GLB</button>
-        <button id="zoomIn">Zoom +</button>
-        <button id="zoomOut">Zoom −</button>
-        <button id="home">Home</button>
       </div>
-    </footer>
+    </header>
+
+    <main>
+      <canvas id="canvas"></canvas>
+    </main>
   </div>
 
   <!-- Babylon UMD + serializers -->
@@ -78,7 +81,7 @@
     const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
     const scene  = new BABYLON.Scene(engine);
 
-    // Camera
+    // Camera (touch-friendly orbit)
     const camera = new BABYLON.ArcRotateCamera("cam",
       Math.PI * 0.25, Math.PI * 0.33, 22,
       new BABYLON.Vector3(0, 3, 0), scene);
@@ -172,8 +175,7 @@
       const el = document.createElement("div");
       el.textContent = msg;
       Object.assign(el.style,{
-        position:"fixed", bottom:`calc(88px + ${getComputedStyle(document.documentElement).getPropertyValue('--safe-bottom')||'0px'})`,
-        left:"50%", transform:"translateX(-50%)",
+        position:"fixed", bottom:"72px", left:"50%", transform:"translateX(-50%)",
         background:"rgba(30,30,34,.9)", color:"#fff",
         padding:"10px 14px", borderRadius:"10px", fontSize:"14px", zIndex:99999
       });
@@ -182,18 +184,11 @@
     }
 
     // UI hooks
-    const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
     document.getElementById("add").onclick   = () => addBlock();
     document.getElementById("rand").onclick  = () => randomize();
     document.getElementById("save").onclick  = () => saveLayout();
     document.getElementById("load").onclick  = () => loadLayout();
     document.getElementById("export").onclick= () => exportGLB();
-    document.getElementById("zoomIn").onclick  = () => { camera.radius = clamp(camera.radius * 0.9, camera.lowerRadiusLimit, camera.upperRadiusLimit); };
-    document.getElementById("zoomOut").onclick = () => { camera.radius = clamp(camera.radius / 0.9, camera.lowerRadiusLimit, camera.upperRadiusLimit); };
-    document.getElementById("home").onclick    = () => {
-      camera.alpha = Math.PI * 0.25; camera.beta = Math.PI * 0.33; camera.radius = 22;
-      camera.setTarget(new BABYLON.Vector3(0, 3, 0));
-    };
 
     // Start
     randomize();
