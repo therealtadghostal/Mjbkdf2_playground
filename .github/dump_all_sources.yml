@@ -1,77 +1,77 @@
-name: Dump sources to docs/src
-on:
-  push:
-    branches: [ main ]
-    paths-ignore:
-      - 'docs/**'        # avoid re-triggering when we commit dumps
-      - '.github/**'
-  workflow_dispatch:
+# name: Dump sources to docs/src
+# on:
+#   push:
+#     branches: [ main ]
+#     paths-ignore:
+#       - 'docs/**'        # avoid re-triggering when we commit dumps
+#       - '.github/**'
+#   workflow_dispatch:
 
-jobs:
-  dump:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
+# jobs:
+#   dump:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v4
+#         with:
+#           fetch-depth: 1
 
-      - name: Rebuild docs/src as fenced markdown
-        run: |
-          set -euo pipefail
-          rm -rf docs/src
-          mkdir -p docs/src
+#       - name: Rebuild docs/src as fenced markdown
+#         run: |
+#           set -euo pipefail
+#           rm -rf docs/src
+#           mkdir -p docs/src
 
-          map_lang() {
-            case "$1" in
-              js) echo js;;
-              ts) echo ts;;
-              tsx) echo tsx;;
-              jsx) echo jsx;;
-              html|htm) echo html;;
-              css) echo css;;
-              json) echo json;;
-              yml|yaml) echo yaml;;
-              md|markdown) echo md;;
-              py) echo python;;
-              sh|bash|zsh) echo bash;;
-              vue) echo vue;;
-              svelte) echo svelte;;
-              glsl|vert|frag) echo glsl;;
-              c) echo c;;
-              cc|cpp|cxx|hpp|h) echo cpp;;
-              java) echo java;;
-              rs) echo rust;;
-              go) echo go;;
-              rb) echo ruby;;
-              php) echo php;;
-              kt|kts) echo kotlin;;
-              *) echo "";;
-            esac
-          }
+#           map_lang() {
+#             case "$1" in
+#               js) echo js;;
+#               ts) echo ts;;
+#               tsx) echo tsx;;
+#               jsx) echo jsx;;
+#               html|htm) echo html;;
+#               css) echo css;;
+#               json) echo json;;
+#               yml|yaml) echo yaml;;
+#               md|markdown) echo md;;
+#               py) echo python;;
+#               sh|bash|zsh) echo bash;;
+#               vue) echo vue;;
+#               svelte) echo svelte;;
+#               glsl|vert|frag) echo glsl;;
+#               c) echo c;;
+#               cc|cpp|cxx|hpp|h) echo cpp;;
+#               java) echo java;;
+#               rs) echo rust;;
+#               go) echo go;;
+#               rb) echo ruby;;
+#               php) echo php;;
+#               kt|kts) echo kotlin;;
+#               *) echo "";;
+#             esac
+#           }
 
           # Mirror all *text* files, skipping heavy/system dirs
-          while IFS= read -r -d '' f; do
+#           while IFS= read -r -d '' f; do
             # Only process text files
-            if [[ "$(file -bi "$f")" != text/* ]]; then
-              continue
-            fi
+#             if [[ "$(file -bi "$f")" != text/* ]]; then
+#               continue
+#             fi
             # Output path under docs/src, preserve tree, add .md
-            out="docs/src/${f}.md"
-            mkdir -p "$(dirname "$out")"
-            ext="${f##*.}"
-            lang="$(map_lang "$ext")"
+#             out="docs/src/${f}.md"
+#             mkdir -p "$(dirname "$out")"
+#             ext="${f##*.}"
+#             lang="$(map_lang "$ext")"
 
-            { echo '```'"$lang"; cat "$f"; echo; echo '```'; } > "$out"
-          done < <(find . -type f \
-              ! -path './.git/*' \
-              ! -path './.github/*' \
-              ! -path './docs/*' \
-              ! -path './node_modules/*' \
-              ! -path './dist/*' \
-              ! -path './build/*' \
-              -print0)
+#             { echo '```'"$lang"; cat "$f"; echo; echo '```'; } > "$out"
+#           done < <(find . -type f \
+#               ! -path './.git/*' \
+#               ! -path './.github/*' \
+#               ! -path './docs/*' \
+#               ! -path './node_modules/*' \
+#               ! -path './dist/*' \
+#               ! -path './build/*' \
+#               -print0)
 
-      - uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: 'chore: dump sources to docs/src'
-          file_pattern: docs/src/**
+#       - uses: stefanzweifel/git-auto-commit-action@v5
+#         with:
+#           commit_message: 'chore: dump sources to docs/src'
+#           file_pattern: docs/src/**
