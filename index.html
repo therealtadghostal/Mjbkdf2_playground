@@ -5,51 +5,33 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>KDF Brutalist Playground</title>
   <style>
-    :root{
-      --safe-top: env(safe-area-inset-top, 0px);
-      --bar-bg: rgba(16,16,18,.65);
-    }
+    :root{ --safe-top: env(safe-area-inset-top, 0px); --bar-bg: rgba(16,16,18,.65); }
     html, body { height: 100%; margin: 0; background:#0b0c0d; color:#e8e8e8; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
 
-    /* 2-row grid: header (auto) / main (fills). Using svh/dvh for iOS 16+ bars. */
+    /* 2-row grid: header / canvas */
     #app{
-      height: 100vh; height: 100dvh; height: 100svh;
+      height: 100svh; height: 100dvh; height: 100vh;
       display: grid;
       grid-template-rows: max-content 1fr;
       overflow: hidden;
     }
-
     header{
       background: var(--bar-bg);
       -webkit-backdrop-filter: saturate(120%) blur(6px);
       backdrop-filter: saturate(120%) blur(6px);
-      padding: calc(10px + var(--safe-top)) 12px 10px 12px;
-      display: grid;
-      gap: 8px;
+      padding: calc(10px + var(--safe-top)) 12px 10px;
+      display: grid; gap: 8px;
     }
-    header .title{ font-weight: 600; letter-spacing: .2px; }
-
-    /* Buttons row scrolls horizontally on small screens */
-    #ui{
-      display: grid;
-      grid-auto-flow: column;
-      gap: 8px;
-      overflow-x: auto;
-      -webkit-overflow-scrolling: touch;
-    }
-    button{
-      font-size: 16px; padding: 10px 12px;
-      border-radius: 12px; border: 0;
-      background:#1c1f23; color:#fff; white-space: nowrap;
-    }
+    .title{ font-weight: 600; letter-spacing: .2px; }
+    #ui{ display: grid; grid-auto-flow: column; gap: 8px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    button{ font-size: 16px; padding: 10px 12px; border-radius: 12px; border: 0; background:#1c1f23; color:#fff; white-space: nowrap; }
     button:active{ transform: translateY(1px); }
 
     main{ position: relative; overflow: hidden; }
     #canvas{
       width: 100%; height: 100%;
       display: block; outline: none;
-      touch-action: none;           /* let Babylon own gestures */
-      -webkit-user-select: none; user-select: none;
+      touch-action: none; -webkit-user-select: none; user-select: none;
     }
   </style>
 </head>
@@ -58,17 +40,16 @@
     <header>
       <div class="title">Brutalist Builder — touch to orbit, pinch to zoom</div>
       <div id="ui">
-        <button id="add">New Block</button>
-        <button id="rand">Randomize</button>
+        <button id="add">Add Block</button>
+        <button id="rand">Shuffle</button>
         <button id="save">Save</button>
         <button id="load">Load</button>
         <button id="export">Export GLB</button>
+        <button id="sun">Sun ↺</button>
+        <button id="drama">Drama</button>
       </div>
     </header>
-
-    <main>
-      <canvas id="canvas"></canvas>
-    </main>
+    <main><canvas id="canvas"></canvas></main>
   </div>
 
   <!-- Babylon UMD + serializers -->
@@ -80,40 +61,52 @@
     const canvas = document.getElementById("canvas");
     const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
     const scene  = new BABYLON.Scene(engine);
+    scene.clearColor = new BABYLON.Color4(0.07, 0.08, 0.09, 1);
 
-    // Camera (touch-friendly orbit)
+    // Camera
     const camera = new BABYLON.ArcRotateCamera("cam",
       Math.PI * 0.25, Math.PI * 0.33, 22,
       new BABYLON.Vector3(0, 3, 0), scene);
-    camera.lowerRadiusLimit = 6;
-    camera.upperRadiusLimit = 80;
-    camera.panningSensibility = 1200;
-    camera.wheelPrecision = 40;
-    camera.pinchDeltaPercentage = 0.01;
-    camera.useNaturalPinchZoom = true;
+    camera.lowerRadiusLimit = 6; camera.upperRadiusLimit = 80;
+    camera.panningSensibility = 1200; camera.wheelPrecision = 40;
+    camera.pinchDeltaPercentage = 0.01; camera.useNaturalPinchZoom = true;
+    camera.inertia = 0.85; camera.panningInertia = 0.9;
     camera.attachControl(canvas, true);
 
     // Lights
-    const hemi = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0.2, 1, 0), scene); hemi.intensity = 0.7;
+    const hemi = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0.2, 1, 0), scene); hemi.intensity = 0.6;
     const dir = new BABYLON.DirectionalLight("d", new BABYLON.Vector3(-1, -2, -0.5), scene);
-    dir.position = new BABYLON.Vector3(10, 20, 10); dir.intensity = 0.8;
+    dir.position = new BABYLON.Vector3(10, 20, 10); dir.intensity = 0.9;
+
+    // High-quality shadows
+    const shadow = new BABYLON.ShadowGenerator(2048, dir);
+    shadow.useCloseExponentialShadowMap = true;
+    shadow.filteringQuality = BABYLON.ShadowGenerator.QUALITY_HIGH;
+    shadow.bias = 0.0005; shadow.normalBias = 0.5;
 
     // Ground
     const ground = BABYLON.MeshBuilder.CreateGround("g", { width: 80, height: 80 }, scene);
+    ground.receiveShadows = true;
     const gmat = new BABYLON.PBRMaterial("gmat", scene);
-    gmat.roughness = 0.9; gmat.metallic = 0.0; gmat.albedoColor = new BABYLON.Color3(0.08, 0.09, 0.10);
+    gmat.metallic = 0.0; gmat.roughness = 0.95;
+    gmat.albedoColor = new BABYLON.Color3(0.08, 0.09, 0.10);
     ground.material = gmat;
 
-    // Concrete material
-    function makeConcrete(scene){
-      const m = new BABYLON.PBRMaterial("m"+Math.random(), scene);
-      m.metallic = 0.05; m.roughness = 0.55;
-      const c = 0.58 + Math.random()*0.1; m.albedoColor = new BABYLON.Color3(c,c,c);
+    // PBR "concrete" helper
+    function makeConcrete(scene) {
+      const m = new BABYLON.PBRMaterial("m" + Math.random(), scene);
+      m.metallic = 0.06; m.roughness = 0.55;
+      const c = 0.55 + Math.random()*0.12;
+      m.albedoColor = new BABYLON.Color3(c, c, c);
+      // subtle color bias for character
+      const tint = 0.02 * (Math.random() - 0.5);
+      m.albedoColor.g += tint; m.albedoColor.b -= tint;
       return m;
     }
 
+    // Blocks
     const blocks = [];
-    function addBlock(opts = {}){
+    function addBlock(opts = {}) {
       const w = opts.w || (1 + Math.floor(Math.random()*3));
       const h = opts.h || (1 + Math.floor(Math.random()*6));
       const d = opts.d || (1 + Math.floor(Math.random()*3));
@@ -122,18 +115,29 @@
       const gx = (Math.floor((Math.random()*10 - 5)))*2;
       const gz = (Math.floor((Math.random()*10 - 5)))*2;
       mesh.position.set(gx, h/2, gz);
-      mesh.rotation.y = (Math.random() - 0.5) * 0.1;
+      mesh.rotation.y = (Math.random() - 0.5) * 0.12;
+      shadow.addShadowCaster(mesh, true);
       blocks.push(mesh);
       return mesh;
     }
 
-    function randomize(){
+    // "Better shuffle": clustered towers + offsets
+    function randomize() {
       blocks.forEach(b => b.dispose()); blocks.length = 0;
-      const count = 18 + Math.floor(Math.random()*16);
-      for (let i=0;i<count;i++) addBlock();
+      const towers = 6 + Math.floor(Math.random()*6);
+      for (let t=0; t<towers; t++){
+        const baseX = (Math.floor((Math.random()*8 - 4)))*2;
+        const baseZ = (Math.floor((Math.random()*8 - 4)))*2;
+        const height = 3 + Math.floor(Math.random()*8);
+        for (let i=0; i<height; i++){
+          addBlock({ w: 1 + Math.floor(Math.random()*3), h: 1 + Math.floor(Math.random()*3), d: 1 + Math.floor(Math.random()*3) })
+            .position.set(baseX + (Math.random()<0.35?2:0), (i*1.2)+0.6, baseZ + (Math.random()<0.35?2:0));
+        }
+      }
     }
 
-    function saveLayout(){
+    // Save/Load/Export
+    function saveLayout() {
       const data = blocks.map(b => ({
         p:{x:b.position.x, y:b.position.y, z:b.position.z},
         r:{x:b.rotation.x, y:b.rotation.y, z:b.rotation.z},
@@ -146,30 +150,52 @@
       localStorage.setItem("kdf_brutal_layout", JSON.stringify(data));
       toast("Saved");
     }
-
-    function loadLayout(){
+    function loadLayout() {
       const raw = localStorage.getItem("kdf_brutal_layout");
-      if(!raw) return toast("No save");
+      if (!raw) return toast("No save");
       blocks.forEach(b => b.dispose()); blocks.length = 0;
       JSON.parse(raw).forEach(it => {
         const mesh = BABYLON.MeshBuilder.CreateBox("b", { width:it.d.w, height:it.d.h, depth:it.d.z }, scene);
         mesh.material = makeConcrete(scene);
         mesh.position.set(it.p.x, it.p.y, it.p.z);
+        mesh.rotation.set(it.r.x, it.r.y, it.r.z);
+        shadow.addShadowCaster(mesh, true);
         blocks.push(mesh);
       });
       toast("Loaded");
     }
-
     async function exportGLB(){
       if (!BABYLON.GLTF2Export) return toast("Serializer missing");
       try{
         const result = await BABYLON.GLTF2Export.GLBAsync(scene, "brutalist-playground");
-        result.downloadFiles();
-        toast("Exported .glb");
+        result.downloadFiles(); toast("Exported .glb");
       }catch(e){ console.error(e); toast("Export failed"); }
     }
 
-    // Toast helper
+    // Post FX: FXAA + toggleable "Drama" (bloom, vignette, contrast)
+    const pipeline = new BABYLON.DefaultRenderingPipeline("dp", true, scene, [camera]);
+    pipeline.fxaaEnabled = true;
+    function setDrama(on){
+      pipeline.bloomEnabled = on;
+      pipeline.bloomThreshold = 0.8; pipeline.bloomWeight = 0.28; pipeline.bloomKernel = 40; pipeline.bloomScale = 0.5;
+      const ip = scene.imageProcessingConfiguration;
+      ip.vignetteEnabled = on; ip.vignetteWeight = 0.9; ip.vignetteStretch = 0.5;
+      ip.vignetteColor = new BABYLON.Color4(0,0,0,1);
+      ip.vignetteBlendMode = BABYLON.ImageProcessingConfiguration.VIGNETTEMODE_MULTIPLY;
+      ip.contrast = on ? 1.18 : 1.0; ip.exposure = on ? 1.05 : 1.0;
+    }
+    let drama = true; setDrama(drama);
+
+    // Sun rotation
+    let sunAngle = 0;
+    function rotateSun(){
+      sunAngle += Math.PI/8;
+      const x = Math.cos(sunAngle), z = Math.sin(sunAngle);
+      dir.direction = new BABYLON.Vector3(-x, -2, -0.5*z).normalize();
+      toast("Sun rotated");
+    }
+
+    // Toast
     let t; function toast(msg){
       clearTimeout(t);
       const el = document.createElement("div");
@@ -179,18 +205,19 @@
         background:"rgba(30,30,34,.9)", color:"#fff",
         padding:"10px 14px", borderRadius:"10px", fontSize:"14px", zIndex:99999
       });
-      document.body.appendChild(el);
-      t=setTimeout(()=>el.remove(),1400);
+      document.body.appendChild(el); t=setTimeout(()=>el.remove(),1400);
     }
 
     // UI hooks
-    document.getElementById("add").onclick   = () => addBlock();
-    document.getElementById("rand").onclick  = () => randomize();
-    document.getElementById("save").onclick  = () => saveLayout();
-    document.getElementById("load").onclick  = () => loadLayout();
-    document.getElementById("export").onclick= () => exportGLB();
+    document.getElementById("add").onclick    = () => addBlock();
+    document.getElementById("rand").onclick   = () => randomize();
+    document.getElementById("save").onclick   = () => saveLayout();
+    document.getElementById("load").onclick   = () => loadLayout();
+    document.getElementById("export").onclick = () => exportGLB();
+    document.getElementById("sun").onclick    = () => rotateSun();
+    document.getElementById("drama").onclick  = () => { drama = !drama; setDrama(drama); toast(drama ? "Drama on" : "Drama off"); };
 
-    // Start
+    // Go
     randomize();
     const resize = () => engine.resize();
     window.addEventListener("resize", resize);
